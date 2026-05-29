@@ -1,0 +1,143 @@
+@import "tailwindcss";
+
+/* CRT Retro VHS Scanlines Overlay */
+.bg-scanlines {
+  background: linear-gradient(
+    rgba(18, 16, 16, 0) 50%, 
+    rgba(0, 0, 0, 0.45) 50%
+  ), linear-gradient(
+    90deg,
+    rgba(255, 0, 0, 0.04),
+    rgba(0, 255, 0, 0.01),
+    rgba(0, 0, 255, 0.04)
+  );
+  background-size: 100% 3.5px, 3px 100%;
+}
+
+/* Screen Static Noise Dust Particles */
+.bg-static-dust {
+  background-image: radial-gradient(circle at 50% 50%, rgba(200, 200, 200, 0.15) 1%, transparent 1.5%),
+                    radial-gradient(circle at 20% 70%, rgba(200, 200, 200, 0.10) 1%, transparent 1.2%),
+                    radial-gradient(circle at 80% 30%, rgba(200, 200, 200, 0.12) 1%, transparent 1.6%);
+  background-size: 110px 110px, 90px 90px, 140px 140px;
+  animation: staticDustMove 0.4s steps(4) infinite;
+}
+
+@keyframes staticDustMove {
+  0% { background-position: 0px 0px, 0px 0px, 0px 0px; }
+  50% { background-position: 15px -20px, -10px 30px, 20px 10px; }
+  100% { background-position: -10px 10px, 20px -15px, -30px 40px; }
+}
+
+/* CRT Screen Flicker */
+@keyframes crtFlicker {
+  0% { opacity: 0.978; }
+  25% { opacity: 0.992; }
+  50% { opacity: 0.965; }
+  75% { opacity: 0.985; }
+  100% { opacity: 0.972; }
+}
+
+#terminal-vhs-layer {
+  animation: crtFlicker 0.15s infinite;
+  background: radial-gradient(circle, transparent 55%, rgba(0,0,0,0.7) 100%);
+}
+
+/* Neon Red Horror Pulse & CRT Shadows */
+.border-spooky {
+  border-color: rgba(142, 21, 21, 0.62);
+  box-shadow: 0 0 10px rgba(139, 0, 0, 0.15), inset 0 0 5px rgba(0, 0, 0, 0.85);
+}
+
+.text-glitch-active {
+  text-shadow: 0.05em 0 0 rgba(255, 0, 0, 0.75),
+               -0.025em -0.05em 0 rgba(0, 255, 0, 0.75),
+               0.025em 0.05em 0 rgba(0, 0, 255, 0.75);
+  animation: glitchTextSkew 1s infinite alternate-reverse;
+}
+
+@keyframes glitchTextSkew {
+  0% {
+    text-shadow: 1px 0px 0px red, -1px 1px 0px green;
+  }
+  50% {
+    text-shadow: -1px -1px 0px red, 1px -1px 0px blue;
+  }
+  100% {
+    text-shadow: 2px 1px 0px blue, -2px -1px 0px red;
+  }
+}
+
+/* Loading animations for retro console */
+.loading-dots::after {
+  content: '...';
+  display: inline-block;
+  width: 0em;
+  overflow: hidden;
+  vertical-align: bottom;
+  animation: dots 1.6s steps(4) infinite;
+}
+
+@keyframes dots {
+  to { width: 1.25em; }
+}
+
+/* custom scrollbars for survival logs */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #050505;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 0, 0, 0.6);
+}
+
+/* Shake styling for key nodes */
+@keyframes widgetShake {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-1.5px, 1.5px); }
+  40% { transform: translate(-1.5px, -1.5px); }
+  60% { transform: translate(1.5px, 1.5px); }
+  80% { transform: translate(1.5px, -1.5px); }
+  100% { transform: translate(0, 0); }
+}
+
+.animate-shake-crazy {
+  animation: widgetShake 0.12s infinite;
+}
+
+/* Custom progress-bar scanning animations */
+@keyframes progressScan {
+  0% { background-position: 0 0; }
+  100% { background-position: 30px 0; }
+}
+
+.progress-bar-animation {
+  background-image: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.15) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.15) 50%,
+    rgba(255, 255, 255, 0.15) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 15px 15px;
+  animation: progressScan 1s linear infinite;
+}
+
+/* Neon glow font mapping */
+.amber-terminal-glow {
+  text-shadow: 0 0 5px rgba(245, 158, 11, 0.5);
+}
+
+.red-terminal-glow {
+  text-shadow: 0 0 8px rgba(220, 38, 38, 0.8);
+}

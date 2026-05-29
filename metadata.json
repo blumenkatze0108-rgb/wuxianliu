@@ -1,0 +1,6 @@
+{
+  "name": "LIMBO / 生还者测试终端",
+  "description": "心理恐怖无限流模拟终端，体验不断被异常污染的诡秘系统。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
