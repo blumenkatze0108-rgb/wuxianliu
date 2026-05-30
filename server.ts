@@ -27,7 +27,7 @@ app.post("/api/proxy/models", async (req, res) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    const response = await fetch(`${cleanEndpoint}/models`, {
+    let response = await fetch(`${cleanEndpoint}/models`, {
       method: "GET",
       headers: {
         "Authorization": apiKey ? `Bearer ${apiKey}` : "",
@@ -37,6 +37,28 @@ app.post("/api/proxy/models", async (req, res) => {
     });
 
     clearTimeout(timeoutId);
+
+    // Auto fallback to /v1/models if 404 response on OpenAI-compatible root URL structure
+    if (!response.ok && response.status === 404 && !cleanEndpoint.endsWith("/v1") && !cleanEndpoint.endsWith("/v1/")) {
+      const retryController = new AbortController();
+      const retryTimeoutId = setTimeout(() => retryController.abort(), 6000);
+      try {
+        const retryResponse = await fetch(`${cleanEndpoint}/v1/models`, {
+          method: "GET",
+          headers: {
+            "Authorization": apiKey ? `Bearer ${apiKey}` : "",
+            "Content-Type": "application/json"
+          },
+          signal: retryController.signal
+        });
+        clearTimeout(retryTimeoutId);
+        if (retryResponse.ok) {
+          response = retryResponse;
+        }
+      } catch (err) {
+        clearTimeout(retryTimeoutId);
+      }
+    }
 
     if (response.ok) {
       const data = await response.json();
@@ -53,7 +75,8 @@ app.post("/api/proxy/models", async (req, res) => {
         { id: "UNKNOWN_ENTITY_VOICE (Unstable)", name: "UNKNOWN_ENTITY_VOICE (Unstable)" },
         { id: "SURVIVOR-GHOST-REMNANT", name: "SURVIVOR-GHOST-REMNANT" }
       ],
-      warning: "Fallback local entity models resolved. Connection quarantined."
+      warning: "Fallback local entity models resolved. Connection quarantined.",
+      error: err.message || String(err)
     });
   }
 });
@@ -94,7 +117,7 @@ app.post("/api/proxy/chat", async (req, res) => {
     const timeoutId = setTimeout(() => controller.abort(), 12000);
 
     // Call OpenAI / SillyTavern style completions
-    const response = await fetch(`${cleanEndpoint}/chat/completions`, {
+    let response = await fetch(`${cleanEndpoint}/chat/completions`, {
       method: "POST",
       headers: {
         "Authorization": apiKey ? `Bearer ${apiKey}` : "",
@@ -112,6 +135,36 @@ app.post("/api/proxy/chat", async (req, res) => {
     });
 
     clearTimeout(timeoutId);
+
+    // Auto fallback to /v1/chat/completions if 404 on root endpoint URL
+    if (!response.ok && response.status === 404 && !cleanEndpoint.endsWith("/v1") && !cleanEndpoint.endsWith("/v1/")) {
+      const retryController = new AbortController();
+      const retryTimeoutId = setTimeout(() => retryController.abort(), 12000);
+      try {
+        const retryResponse = await fetch(`${cleanEndpoint}/v1/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Authorization": apiKey ? `Bearer ${apiKey}` : "",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: model || "gpt-3.5-turbo",
+            messages: customMessages.map((m: any) => ({
+              role: m.role === "user" ? "user" : "assistant",
+              content: m.text || m.content
+            })),
+            max_tokens: 300
+          }),
+          signal: retryController.signal
+        });
+        clearTimeout(retryTimeoutId);
+        if (retryResponse.ok) {
+          response = retryResponse;
+        }
+      } catch (err) {
+        clearTimeout(retryTimeoutId);
+      }
+    }
 
     if (response.ok) {
       const responseData = await response.json();

@@ -65,6 +65,7 @@ export interface SillyTavernConfig {
   customSystemPrompt: string;
   isCustomEnabled: boolean;
   characterPresetFile?: string; // JSON contents
+  directMode?: boolean;
 }
 
 export interface SavedInstance {

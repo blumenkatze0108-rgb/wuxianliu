@@ -80,8 +80,10 @@ export default function App() {
     apiKey: "",
     selectedModel: "LIMBO-CLAUDE-3.5-HAUNTED",
     customSystemPrompt: "你是一个绝望死去的生还者的幽灵，被格式化在这个系统档案里，极其惊恐并想让玩家也沉沦......",
-    isCustomEnabled: false
+    isCustomEnabled: false,
+    directMode: false
   });
+  const [stConnectionError, setStConnectionError] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([
     "LIMBO-CLAUDE-3.5-HAUNTED",
     "ST-GPT-4o-CORRUPTED",
@@ -517,25 +519,75 @@ export default function App() {
     // Check if SillyTavern settings or external proxy is in action
     try {
       const controller = new AbortController();
-      const response = await fetch("/api/proxy/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          endpoint: stConfig.endpoint,
-          apiKey: stConfig.apiKey,
-          model: stConfig.selectedModel,
-          pollution: profile.pollutionValue,
-          messages: [
-            ...chatMessages.map(m => ({ role: m.role, content: m.text })),
-            { role: "user", content: userMsgText }
-          ]
-        }),
-        signal: controller.signal
-      });
+      let response;
 
-      if (response.ok) {
+      if (stConfig.directMode) {
+        // Direct browser calling to the LLM endpoint! (Bypasses backend server proxy, ideal for Cloudflare static pages)
+        const cleanEndpoint = stConfig.endpoint.trim().replace(/\/$/, "");
+        const chatUrl = `${cleanEndpoint}/chat/completions`;
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json"
+        };
+        if (stConfig.apiKey) {
+          headers["Authorization"] = `Bearer ${stConfig.apiKey}`;
+        }
+
+        const systemPrompt = stConfig.isCustomEnabled ? stConfig.customSystemPrompt : "你是一个绝望死去的生还者的幽灵，被格式化在这个系统档案里，极其惊恐并想让玩家也沉沦......";
+        const formattedMessages = [
+          { role: "system", content: systemPrompt },
+          ...chatMessages.map(m => ({
+            role: m.role === "user" ? "user" : "assistant",
+            content: m.text
+          })),
+          { role: "user", content: userMsgText }
+        ];
+
+        response = await fetch(chatUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: stConfig.selectedModel || "gpt-3.5-turbo",
+            messages: formattedMessages,
+            max_tokens: 400
+          }),
+          signal: controller.signal
+        });
+
+        // Smart client-side fallback if meeting standard 404 (missing /v1 prefix in endpoint)
+        if (!response.ok && response.status === 404 && !cleanEndpoint.endsWith("/v1") && !cleanEndpoint.endsWith("/v1/")) {
+          response = await fetch(`${cleanEndpoint}/v1/chat/completions`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              model: stConfig.selectedModel || "gpt-3.5-turbo",
+              messages: formattedMessages,
+              max_tokens: 400
+            }),
+            signal: controller.signal
+          });
+        }
+      } else {
+        // Fetch via server backend proxy
+        response = await fetch("/api/proxy/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            endpoint: stConfig.endpoint,
+            apiKey: stConfig.apiKey,
+            model: stConfig.selectedModel,
+            pollution: profile.pollutionValue,
+            messages: [
+              ...chatMessages.map(m => ({ role: m.role, content: m.text })),
+              { role: "user", content: userMsgText }
+            ]
+          }),
+          signal: controller.signal
+        });
+      }
+
+      if (response && response.ok) {
         const data = await response.json();
         const responseText = data?.choices?.[0]?.message?.content || "[终端解密超时]: 数据链路不配合。";
         
@@ -556,6 +608,9 @@ export default function App() {
           ...p,
           pollutionValue: Math.min(100, p.pollutionValue + 2)
         }));
+      } else {
+        const errText = response ? `HTTP ${response.status}` : "未知错误";
+        throw new Error(`连接失败: ${errText}`);
       }
     } catch (err) {
       // Local fallback with spooky flavor if anything blocks
@@ -598,33 +653,133 @@ export default function App() {
   // SillyTavern custom model list puller
   const handleFetchSTModels = async () => {
     setIsFetchingModels(true);
+    setStConnectionError(null);
     audio.triggerGlitchNoise();
     
-    try {
-      const response = await fetch("/api/proxy/models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          endpoint: stConfig.endpoint,
-          apiKey: stConfig.apiKey
-        })
-      });
+    const cleanEndpoint = stConfig.endpoint.trim().replace(/\/$/, "");
 
-      if (response.ok) {
-        const modelsResult = await response.json();
-        if (modelsResult.data && Array.isArray(modelsResult.data)) {
-          const names = modelsResult.data.map((m: any) => m.id || m.name);
-          setAvailableModels(names);
-          if (names.length > 0) {
-            setStConfig(prev => ({ ...prev, selectedModel: names[0] }));
+    if (stConfig.directMode) {
+      // 1. Direct browser connection mode (best for Cloudflare Pages / Static single page deploy)
+      try {
+        let names: string[] = [];
+        let success = false;
+        let lastErrDesc = "";
+
+        const runDirectFetch = async (url: string) => {
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          if (stConfig.apiKey) {
+            headers["Authorization"] = `Bearer ${stConfig.apiKey}`;
+          }
+          const res = await fetch(url, { method: "GET", headers });
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText || "请求被拒绝"}`);
+          }
+          return await res.json();
+        };
+
+        // Try Ollama api/tags directly if endpoint matches standard Ollama structure
+        if (cleanEndpoint.includes("11434") || cleanEndpoint.includes("/api")) {
+          try {
+            const data = await runDirectFetch(`${cleanEndpoint}/api/tags`);
+            if (data && Array.isArray(data.models)) {
+              names = data.models.map((m: any) => m.name || m.model);
+              success = true;
+            }
+          } catch (e: any) {
+            lastErrDesc = e.message;
           }
         }
+
+        // Try OpenAI standard /models path
+        if (!success) {
+          try {
+            const data = await runDirectFetch(`${cleanEndpoint}/models`);
+            if (data && Array.isArray(data.data)) {
+              names = data.data.map((m: any) => m.id || m.name);
+              success = true;
+            } else if (data && Array.isArray(data.models)) {
+              names = data.models.map((m: any) => m.name || m.model);
+              success = true;
+            }
+          } catch (e: any) {
+            lastErrDesc = e.message;
+            // Retry auto-appending /v1/models if root endpoint URL was passed
+            if (!cleanEndpoint.endsWith("/v1") && !cleanEndpoint.endsWith("/v1/")) {
+              try {
+                const data = await runDirectFetch(`${cleanEndpoint}/v1/models`);
+                if (data && Array.isArray(data.data)) {
+                  names = data.data.map((m: any) => m.id || m.name);
+                  success = true;
+                } else if (data && Array.isArray(data.models)) {
+                  names = data.models.map((m: any) => m.name || m.model);
+                  success = true;
+                }
+              } catch (v1Err: any) {
+                lastErrDesc = `经典路经和v1缀路径皆无法连接: ${v1Err.message}`;
+              }
+            }
+          }
+        }
+
+        if (success && names.length > 0) {
+          setAvailableModels(names);
+          setStConfig(prev => ({ ...prev, selectedModel: names[0] }));
+        } else {
+          throw new Error(lastErrDesc || "能够请求但未能从返回内容中提取模型列表。请确认输入端点符合 API 规范。");
+        }
+      } catch (err: any) {
+        const fallbackMsg = err.message || String(err);
+        setStConnectionError(`直连拉取故障: ${fallbackMsg}`);
+        setLastScaryText(`浏览器端点请求失败。可能原因是本地 LLM 服务暂未开启跨域协议 (CORS)，或端点地址错误。`);
+      } finally {
+        setIsFetchingModels(false);
       }
-    } catch (err) {
-      // Return beautiful spooky list
-      setLastScaryText("节点探测失败。未知干扰正拦截你的路由电缆。");
-    } finally {
-      setIsFetchingModels(false);
+    } else {
+      // 2. Server backend proxy mode
+      try {
+        const response = await fetch("/api/proxy/models", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            endpoint: stConfig.endpoint,
+            apiKey: stConfig.apiKey
+          })
+        });
+
+        if (response.ok) {
+          const modelsResult = await response.json();
+          let names: string[] = [];
+
+          // Parse results (support OpenAI structure and Ollama API types)
+          if (modelsResult.data && Array.isArray(modelsResult.data)) {
+            // If we got spooky local fallback list but there's a backchain error
+            if (modelsResult.error) {
+              setStConnectionError(`代理异常 (回滚本地虚拟列表): ${modelsResult.error}`);
+            }
+            names = modelsResult.data.map((m: any) => m.id || m.name);
+          } else if (modelsResult.models && Array.isArray(modelsResult.models)) {
+            names = modelsResult.models.map((m: any) => m.name || m.model);
+          }
+
+          if (names.length > 0) {
+            setAvailableModels(names);
+            setStConfig(prev => ({ ...prev, selectedModel: names[0] }));
+          } else {
+            if (modelsResult.error) {
+              setStConnectionError(`代理异常: ${modelsResult.error}`);
+            } else {
+              setStConnectionError("服务器响应模型包内无 recognized 数据列。");
+            }
+          }
+        } else {
+          throw new Error(`Proxy status error: ${response.status}`);
+        }
+      } catch (err: any) {
+        setStConnectionError(`中转失败: ${err.message || String(err)}`);
+        setLastScaryText("节点探测失败。未知干扰正拦截你的路由电缆。");
+      } finally {
+        setIsFetchingModels(false);
+      }
     }
   };
 
@@ -1346,6 +1501,23 @@ export default function App() {
                   />
                 </div>
 
+                {/* Direct Connection Toggle */}
+                <div className="flex items-center justify-between py-1.5 px-2 bg-neutral-950/80 border border-[#1b1b1b] rounded-sm mt-1">
+                  <div className="flex flex-col">
+                    <span className="text-[9px] text-zinc-300 font-bold uppercase tracking-tight">浏览器直连模式</span>
+                    <span className="text-[8px] text-zinc-600 scale-95 origin-left tracking-tighter">
+                      静态托管(Cloudflare)/本地内网API(127.0.0.1)必选
+                    </span>
+                  </div>
+                  <input 
+                    type="checkbox"
+                    id="direct-connection-toggle"
+                    checked={stConfig.directMode || false}
+                    onChange={(e) => setStConfig({...stConfig, directMode: e.target.checked})}
+                    className="w-3.5 h-3.5 accent-red-900 bg-black border border-[#222] rounded cursor-pointer"
+                  />
+                </div>
+
                 {/* Model Lists Choice & Load trigger */}
                 <div className="space-y-1">
                   <div className="flex justify-between items-center">
@@ -1364,7 +1536,7 @@ export default function App() {
                   <select 
                     value={stConfig.selectedModel}
                     onChange={(e) => setStConfig({...stConfig, selectedModel: e.target.value})}
-                    className="w-full bg-black border border-[#222] p-2 text-[10px] outline-none text-red-500 font-bold font-mono"
+                    className="w-full bg-[#050505] border border-[#222] p-2 text-[10px] outline-none text-red-500 font-bold font-mono focus:border-red-950"
                     id="api-model-select"
                   >
                     {availableModels.map(model => (
@@ -1372,6 +1544,25 @@ export default function App() {
                     ))}
                   </select>
                 </div>
+
+                {/* Connection Status and Troubleshooting Hints */}
+                {stConnectionError && (
+                  <div className="p-2 border border-red-950/60 bg-red-950/25 rounded-sm text-[8px] sm:text-[9px] text-red-400 font-mono space-y-1 block animate-pulse">
+                    <div className="flex items-center gap-1 font-bold text-red-500">
+                      <span>⚡ 链路探测失败:</span>
+                    </div>
+                    <p className="leading-normal break-all whitespace-pre-wrap">{stConnectionError}</p>
+                    {stConfig.endpoint.includes("127.0.0.1") || stConfig.endpoint.includes("localhost") ? (
+                      <p className="text-yellow-600/90 leading-tight">
+                        💡 提示：检测到您使用的是本地私有地址。云端服务器无法连通该网络，请务必【勾选上方“浏览器直连模式”】。
+                      </p>
+                    ) : (
+                      <p className="text-zinc-500 leading-tight border-t border-[#2a1313] pt-1 mt-1">
+                        提示：静态托管在 Cloudflare 平台时无后端 Express 服务器，任何非直连请求都将失效。请尝试启用上方直连模式，并确认 API 服务器已开启 CORS 跨域许可。
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* TavernPreset custom file loader upload interface */}
                 <div className="p-2 border border-dashed border-[#222] bg-neutral-950/40 rounded flex flex-col space-y-1 border-spooky">
